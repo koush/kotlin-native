@@ -3888,3 +3888,22 @@ task buildKonanTests { t ->
             .matching { !(it instanceof KonanStandaloneTest) && it instanceof KonanLocalTest }
             .forEach { it.dependsOn(t) }
 }
+
+if (PlatformInfo.getTarget(project).name == "ios_arm64") {
+    def t = task("prepareLauncher") {
+        def launcherPath = Paths.get(testOutputRoot, "launcher")
+        if (launcherPath.toFile().exists()) {
+            delete(launcherPath)
+        }
+        copy {
+            from(project.file("iosLauncher"))
+            into(launcherPath)
+        }
+    }
+    project.tasks
+            .matching { it instanceof KonanGTest || it instanceof FrameworkTest }
+            .forEach {
+                it.dependsOn(t)
+                it.doFirst(ExecutorServiceKt.xcodeBuild)
+            }
+}

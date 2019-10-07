@@ -29,6 +29,9 @@ val Project.testTarget
 val Project.verboseTest
     get() = hasProperty("test_verbose")
 
+val Project.testOutputRoot
+    get() = findProperty("testOutputRoot") as String
+
 val Project.testOutputLocal
     get() = (findProperty("testOutputLocal") as File).toString()
 

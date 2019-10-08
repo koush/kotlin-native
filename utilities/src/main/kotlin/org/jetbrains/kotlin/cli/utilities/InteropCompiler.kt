@@ -19,7 +19,7 @@ import org.jetbrains.kotlin.native.interop.tool.*
 // TODO: this function should eventually be eliminated from 'utilities'. 
 // The interaction of interop and the compiler should be streamlined.
 
-fun invokeInterop(flavor: String, args: Array<String>): Array<String> {
+fun invokeInterop(flavor: String, args: Array<String>): Array<String>? {
     val arguments = if (flavor == "native") CInteropArguments() else JSInteropArguments()
     arguments.argParser.parse(args)
     val outputFileName = arguments.output
@@ -68,7 +68,7 @@ fun invokeInterop(flavor: String, args: Array<String>): Array<String> {
         additionalProperties.putAll(mapOf("cstubsname" to cstubsName, "import" to imports))
     }
 
-    val cinteropArgsToCompiler = interop(flavor, args + additionalArgs, additionalProperties)
+    val cinteropArgsToCompiler = interop(flavor, args + additionalArgs, additionalProperties) ?: return null
 
     val nativeStubs = 
         if (flavor == "wasm") 
@@ -76,22 +76,20 @@ fun invokeInterop(flavor: String, args: Array<String>): Array<String> {
         else 
             arrayOf("-native-library", File(nativesDir, "$cstubsName.bc").path)
 
-    val konancArgs = arrayOf(
-        generatedDir.path, 
-        "-produce", "library", 
+    return arrayOf(
+        generatedDir.path,
+        "-produce", "library",
         "-o", outputFileName,
         "-target", target.visibleName,
         "-manifest", manifest.path,
         "-Xtemporary-files-dir=$temporaryFilesDir") +
         nativeStubs +
-        cinteropArgsToCompiler + 
-        libraries.flatMap { listOf("-library", it) } + 
+        cinteropArgsToCompiler +
+        libraries.flatMap { listOf("-library", it) } +
         repos.flatMap { listOf("-repo", it) } +
         (if (noDefaultLibs) arrayOf("-$NODEFAULTLIBS") else emptyArray()) +
         (if (noEndorsedLibs) arrayOf("-$NOENDORSEDLIBS") else emptyArray()) +
         (if (purgeUserLibs) arrayOf("-$PURGE_USER_LIBS") else emptyArray())
-
-    return konancArgs
 }
 
 

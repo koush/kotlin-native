@@ -116,6 +116,7 @@ configurations {
     kotlin_native_utils_jar
     kotlin_util_io_jar
     kotlin_util_klib_jar
+    kotlin_kotlinx_metadata_klib_jar
     trove4j_jar
     kotlinCommonSources
 
@@ -138,6 +139,7 @@ dependencies {
     kotlin_native_utils_jar "$kotlinNativeUtilsModule@jar"
     kotlin_util_io_jar "$kotlinUtilIoModule@jar"
     kotlin_util_klib_jar "$kotlinUtilKlibModule@jar"
+    kotlin_kotlinx_metadata_klib_jar "$kotlinKotlinXMetadataKlib@jar"
 
     [kotlinCommonStdlibModule, kotlinTestCommonModule, kotlinTestAnnotationsCommonModule].each {
         kotlinCommonSources(it) { transitive = false }
@@ -247,7 +249,16 @@ task trove4jCopy(type: Copy) {
 
         into 'build/external_jars'
     }
-} 
+}
+
+task kotlinXMetadataKlibCopy(type: Copy) {
+    from configurations.getByName("kotlin_kotlinx_metadata_klib_jar") {
+        include "kotlinx-metadata-klib*.jar"
+        rename "kotlinx-metadata-klib(.*).jar", "kotlinxmetadata.jar"
+
+        into 'build/external_jars'
+    }
+}
 
 externalJars.each { arg ->
     def jar = arg.replace('_', '-') // :(
@@ -264,6 +275,7 @@ externalJars.each { arg ->
 task external_jars(type: Copy) {
     dependsOn externalJars.collect { "${it}Copy" }
     dependsOn trove4jCopy
+    dependsOn kotlinXMetadataKlibCopy
 
     from configurations.compilerCompile {
 

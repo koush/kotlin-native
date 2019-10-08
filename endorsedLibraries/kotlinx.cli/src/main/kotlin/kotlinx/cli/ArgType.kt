@@ -82,6 +82,24 @@ abstract class ArgType<T : Any>(val hasParameter: kotlin.Boolean) {
             get() = { value, name -> if (value in values) value
             else throw ParsingException("Option $name is expected to be one of $values. $value is provided.") }
     }
+
+    companion object {
+        inline fun <reified T : Enum<T>> enumChoice(): ArgType<T> {
+            val stringValues = enumValues<T>().joinToString()
+            return object : ArgType<T>(true) {
+                override val description: kotlin.String
+                    get() = "{ Value should be on of $stringValues}"
+                override val conversion: (value: kotlin.String, name: kotlin.String) -> T
+                    get() = { value, name ->
+                        try {
+                            enumValueOf(value)
+                        } catch (e: IllegalArgumentException) {
+                            throw Exception("Option $name is expected to be one of $stringValues. $value is provided.")
+                        }
+                    }
+            }
+        }
+    }
 }
 
 internal class ParsingException(message: String) : Exception(message)

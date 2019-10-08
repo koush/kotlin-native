@@ -34,8 +34,9 @@ fun main(args: Array<String>) {
     processCLib(args)
 }
 
-fun interop(flavor: String, args: Array<String>, additionalArgs: Map<String, Any> = mapOf()) =
-        when(flavor) {
+fun interop(
+        flavor: String, args: Array<String>, additionalArgs: Map<String, Any> = mapOf()): Array<String>? =
+        when (flavor) {
             "jvm", "native" -> processCLib(args, additionalArgs)
             "wasm" -> processIdlLib(args, additionalArgs)
             else -> error("Unexpected flavor")
@@ -158,8 +159,8 @@ private fun findFilesByGlobs(roots: List<Path>, globs: List<String>): Map<Path, 
     return relativeToRoot
 }
 
-
-private fun processCLib(args: Array<String>, additionalArgs: Map<String, Any> = mapOf()): Array<String> {
+// TODO: This function is a mess. It definitely needs to be refactored.
+private fun processCLib(args: Array<String>, additionalArgs: Map<String, Any> = mapOf()): Array<String>? {
     val cinteropArguments = CInteropArguments()
     cinteropArguments.argParser.parse(args)
     val ktGenRoot = cinteropArguments.generated
@@ -220,25 +221,27 @@ private fun processCLib(args: Array<String>, additionalArgs: Map<String, Any> = 
 
     val (nativeIndex, compilation) = buildNativeIndex(library, verbose)
 
-    // Our current approach to arm64_32 support is to compile armv7k version of bitcode
-    // for arm64_32. That's the reason for this substitution.
-    // TODO: Add proper support with the next LLVM update.
-    val target = when (tool.target) {
-        KonanTarget.WATCHOS_ARM64 -> KonanTarget.WATCHOS_ARM32
-        else -> tool.target
+    val configuration = run {
+        // Our current approach to arm64_32 support is to compile armv7k version of bitcode
+        // for arm64_32. That's the reason for this substitution.
+        // TODO: Add proper support with the next LLVM update.
+        val target = when (tool.target) {
+            KonanTarget.WATCHOS_ARM64 -> KonanTarget.WATCHOS_ARM32
+            else -> tool.target
+        }
+        InteropConfiguration(
+                library = compilation,
+                pkgName = outKtPkg,
+                excludedFunctions = excludedFunctions,
+                excludedMacros = excludedMacros,
+                strictEnums = def.config.strictEnums.toSet(),
+                nonStrictEnums = def.config.nonStrictEnums.toSet(),
+                noStringConversion = def.config.noStringConversion.toSet(),
+                exportForwardDeclarations = def.config.exportForwardDeclarations,
+                disableDesignatedInitializerChecks = def.config.disableDesignatedInitializerChecks,
+                target = target
+        )
     }
-    val configuration = InteropConfiguration(
-            library = compilation,
-            pkgName = outKtPkg,
-            excludedFunctions = excludedFunctions,
-            excludedMacros = excludedMacros,
-            strictEnums = def.config.strictEnums.toSet(),
-            nonStrictEnums = def.config.nonStrictEnums.toSet(),
-            noStringConversion = def.config.noStringConversion.toSet(),
-            exportForwardDeclarations = def.config.exportForwardDeclarations,
-            disableDesignatedInitializerChecks = def.config.disableDesignatedInitializerChecks,
-            target = target
-    )
 
     outKtFile.parentFile.mkdirs()
 
@@ -251,50 +254,66 @@ private fun processCLib(args: Array<String>, additionalArgs: Map<String, Any> = 
         {}
     }
 
+    val mode = when (cinteropArguments.generationMode) {
+        Mode.TEXT -> InteropGenerationMode.Textual(outKtFile, File(outCFile.absolutePath))
+        Mode.METADATA -> InteropGenerationMode.Metadata(File(outCFile.absolutePath))
+    }
+
     val stubIrContext = StubIrContext(logger, configuration, nativeIndex, imports, flavor, libName)
-    val stubIrDriver = StubIrDriver(stubIrContext)
-    stubIrDriver.run(outKtFile, File(outCFile.absolutePath), entryPoint)
+    val stubIrDriver = StubIrDriver(stubIrContext, mode, entryPoint)
+    stubIrDriver.run()
 
-    // TODO: if a library has partially included headers, then it shouldn't be used as a dependency.
-    def.manifestAddendProperties["includedHeaders"] = nativeIndex.includedHeaders.joinToString(" ") { it.value }
+    run {
+        // TODO: if a library has partially included headers, then it shouldn't be used as a dependency.
+        def.manifestAddendProperties["includedHeaders"] = nativeIndex.includedHeaders.joinToString(" ") { it.value }
 
-    def.manifestAddendProperties.putAndRunOnReplace("package", outKtPkg) {
-        _, oldValue, newValue ->
+        def.manifestAddendProperties.putAndRunOnReplace("package", outKtPkg) {
+            _, oldValue, newValue ->
             warn("The package value `$oldValue` specified in .def file is overridden with explicit $newValue")
+        }
+
+        def.manifestAddendProperties["interop"] = "true"
+
+        stubIrContext.addManifestProperties(def.manifestAddendProperties)
+
+        manifestAddend?.parentFile?.mkdirs()
+        manifestAddend?.let { def.manifestAddendProperties.storeProperties(it) }
     }
 
-    def.manifestAddendProperties["interop"] = "true"
-
-    stubIrContext.addManifestProperties(def.manifestAddendProperties)
-
-    manifestAddend?.parentFile?.mkdirs()
-    manifestAddend?.let { def.manifestAddendProperties.storeProperties(it) }
-
-    if (flavor == KotlinPlatform.JVM) {
-
-        val outOFile = tempFiles.create(libName,".o")
-
-        val compilerCmd = arrayOf(compiler, *stubIrContext.libraryForCStubs.compilerArgs.toTypedArray(),
-                "-c", outCFile.absolutePath, "-o", outOFile.absolutePath)
-
-        runCmd(compilerCmd, verbose)
-
-        val outLib = File(nativeLibsDir, System.mapLibraryName(libName))
-
-        val linkerCmd = arrayOf(linker,
-                outOFile.absolutePath, "-shared", "-o", outLib.absolutePath,
-                *linkerOpts)
-
-        runCmd(linkerCmd, verbose)
-    } else if (flavor == KotlinPlatform.NATIVE) {
-        val outBcName = libName + ".bc"
-        val outLib = File(nativeLibsDir, outBcName)
-        val compilerCmd = arrayOf(compiler, *stubIrContext.libraryForCStubs.compilerArgs.toTypedArray(),
-                "-emit-llvm", "-c", outCFile.absolutePath, "-o", outLib.absolutePath)
-
-        runCmd(compilerCmd, verbose)
+    val nativeOutput: File = run {
+        val compilerArgs = stubIrContext.libraryForCStubs.compilerArgs.toTypedArray()
+        when (flavor) {
+            KotlinPlatform.JVM -> {
+                val outOFile = tempFiles.create(libName,".o")
+                val compilerCmd = arrayOf(compiler, *compilerArgs,
+                        "-c", outCFile.absolutePath, "-o", outOFile.absolutePath)
+                runCmd(compilerCmd, verbose)
+                val outLib = File(nativeLibsDir, System.mapLibraryName(libName))
+                val linkerCmd = arrayOf(linker,
+                        outOFile.absolutePath, "-shared", "-o", outLib.absolutePath,
+                        *linkerOpts)
+                runCmd(linkerCmd, verbose)
+                outLib
+            }
+            KotlinPlatform.NATIVE -> {
+                val outBcName = "$libName.bc"
+                val outLib = File(nativeLibsDir, outBcName)
+                val compilerCmd = arrayOf(compiler, *compilerArgs,
+                        "-emit-llvm", "-c", outCFile.absolutePath, "-o", outLib.absolutePath)
+                runCmd(compilerCmd, verbose)
+                outLib
+            }
+        }
     }
-    return argsToCompiler(staticLibraries, libraryPaths)
+
+    return when (mode) {
+        is InteropGenerationMode.Metadata -> {
+            createKlib(cinteropArguments.output, mode, tool.target, nativeOutput.absolutePath, "TODO", def.manifestAddendProperties)
+            null
+        }
+        is InteropGenerationMode.Textual ->
+            argsToCompiler(staticLibraries, libraryPaths)
+    }
 }
 
 internal fun prepareTool(target: String?, flavor: KotlinPlatform): ToolConfig {

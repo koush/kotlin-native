@@ -35,10 +35,21 @@ dependencies {
     compile project(':Interop:Indexer')
     compile "org.jetbrains.kotlin:kotlin-native-shared:$konanVersion"
     compile project(path: ":endorsedLibraries:kotlinx.cli", configuration: "jvmRuntimeElements")
+    compile ("org.jetbrains.kotlinx:kotlinx-metadata-klib:0.0.1") {
+        exclude group:"org.jetbrains.kotlinx", module: "kotlin-util-klib-metadata"
+    }
 }
 
 compileKotlin {
     kotlinOptions {
         freeCompilerArgs = ['-Xuse-experimental=kotlin.ExperimentalUnsignedTypes']
+    }
+}
+
+task ttt {
+    doLast {
+        configurations.compileClasspath.files.each {
+            println(it)
+        }
     }
 }

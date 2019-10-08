@@ -4,10 +4,10 @@
  */
 package org.jetbrains.kotlin.native.interop.gen
 
+import kotlinx.metadata.KmPackage
 import org.jetbrains.kotlin.native.interop.gen.jvm.InteropConfiguration
 import org.jetbrains.kotlin.native.interop.gen.jvm.KotlinPlatform
 import org.jetbrains.kotlin.native.interop.indexer.*
-import java.io.File
 import java.util.*
 
 class StubIrContext(
@@ -86,18 +86,66 @@ class StubIrContext(
     }
 }
 
-class StubIrDriver(private val context: StubIrContext) {
-    fun run(outKtFile: File, outCFile: File, entryPoint: String?) {
+private fun emitCFile(context: StubIrContext, cFile: Appendable, entryPoint: String?, nativeBridges: NativeBridges) {
+    val out = { it: String -> cFile.appendln(it) }
+
+    context.libraryForCStubs.preambleLines.forEach {
+        out(it)
+    }
+    out("")
+
+    out("// NOTE THIS FILE IS AUTO-GENERATED")
+    out("")
+
+    nativeBridges.nativeLines.forEach { out(it) }
+
+    if (entryPoint != null) {
+        out("extern int Konan_main(int argc, char** argv);")
+        out("")
+        out("__attribute__((__used__))")
+        out("int $entryPoint(int argc, char** argv)  {")
+        out("  return Konan_main(argc, argv);")
+        out("}")
+    }
+}
+
+
+class StubIrDriver(
+        private val context: StubIrContext,
+        private val mode: InteropGenerationMode,
+        private val entryPoint: String?
+) {
+    fun run() {
         val builderResult = StubIrBuilder(context).build()
         val bridgeBuilderResult = StubIrBridgeBuilder(context, builderResult).build()
-        outKtFile.bufferedWriter().use { ktFile ->
-            File(outCFile.absolutePath).bufferedWriter().use { cFile ->
-                StubIrTextEmitter(
-                        context,
-                        builderResult,
-                        bridgeBuilderResult
-                ).emit(ktFile, cFile, entryPoint)
-            }
+        // TODO: For now these functions accept same arguments, but later
+        //  textual mode should accept bridges
+        //  and metadata mode should accept wrappers.
+
+        mode.outCFile.bufferedWriter().use {
+            emitCFile(context, it, entryPoint, bridgeBuilderResult.nativeBridges)
         }
+
+        return when (mode) {
+            is InteropGenerationMode.Metadata -> mode.createMetadataOutput(builderResult)
+            is InteropGenerationMode.Textual -> mode.createTextualOutput(builderResult, bridgeBuilderResult)
+        }
+    }
+
+    private fun InteropGenerationMode.Textual.createTextualOutput(
+            builderResult: StubIrBuilderResult,
+            bridgeBuilderResult: BridgeBuilderResult
+    ) {
+        outKtFile.bufferedWriter().use { ktFile ->
+            StubIrTextEmitter(
+                    context, builderResult, bridgeBuilderResult
+            ).emit(ktFile)
+        }
+    }
+
+    private fun InteropGenerationMode.Metadata.createMetadataOutput(
+            builderResult: StubIrBuilderResult
+    ) {
+        result = StubIrMetadataEmitter(builderResult).emit()
     }
 }

@@ -61,9 +61,14 @@ open class CommonInteropArguments(val argParser: ArgParser) {
             description = "save temporary files to the given directory")
 }
 
+enum class Mode {
+    TEXT, METADATA
+}
+
 class CInteropArguments(argParser: ArgParser =
                                 ArgParser("cinterop",
                                         prefixStyle = ArgParser.OPTION_PREFIX_STYLE.JVM)): CommonInteropArguments(argParser) {
+
     val target by argParser.option(ArgType.String, description = "native target to compile to").default("host")
     val def by argParser.option(ArgType.String, description = "the library definition file")
     val header by argParser.option(ArgType.String, description = "header file to produce kotlin bindings for")
@@ -89,6 +94,12 @@ class CInteropArguments(argParser: ArgParser =
     val linkerOption = argParser.option(ArgType.String, "linker-option",
             description = "additional linker option").multiple()
     val linker by argParser.option(ArgType.String, description = "use specified linker")
+
+    val generationMode by argParser.option(ArgType.enumChoice<Mode>(), "mode",
+            description = """
+                Metadata generation mode is faster but it is not stable yet.
+            """.trimIndent()
+    ).default(Mode.TEXT)
 }
 
 class JSInteropArguments(argParser: ArgParser = ArgParser("jsinterop",

@@ -20,12 +20,12 @@ class StubIrContext(
 ) {
     val libraryForCStubs = configuration.library.copy(
             includes = mutableListOf<String>().apply {
+                addAll(configuration.library.includes)
                 add("stdint.h")
                 add("string.h")
                 if (platform == KotlinPlatform.JVM) {
                     add("jni.h")
                 }
-                addAll(configuration.library.includes)
             },
             compilerArgs = configuration.library.compilerArgs,
             additionalPreambleLines = configuration.library.additionalPreambleLines +

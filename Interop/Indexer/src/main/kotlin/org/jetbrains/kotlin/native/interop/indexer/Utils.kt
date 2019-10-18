@@ -257,6 +257,9 @@ fun Compilation.copy(
         language = language
 )
 
+fun Compilation.copyWithArgsForPCH(): Compilation =
+        copy(compilerArgs = compilerArgs.filterNot { it.startsWith("-fmodule-map-file") })
+
 data class CompilationImpl(
         override val includes: List<String>,
         override val additionalPreambleLines: List<String>,
@@ -271,7 +274,7 @@ data class CompilationImpl(
  */
 fun Compilation.precompileHeaders(): CompilationWithPCH = withIndex { index ->
     val options = CXTranslationUnit_ForSerialization
-    val translationUnit = this.parse(index, options)
+    val translationUnit = copyWithArgsForPCH().parse(index, options)
     try {
         translationUnit.ensureNoCompileErrors()
         withPrecompiledHeader(translationUnit)
